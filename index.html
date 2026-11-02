@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free AI Text to Speech</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f3f5fa;margin:0;padding:20px;color:#20243a}
+main{max-width:700px;margin:30px auto;background:white;padding:25px;border-radius:16px;box-shadow:0 4px 20px #0001}
+h1{text-align:center}
+textarea,select{width:100%;box-sizing:border-box;padding:14px;margin:10px 0;border:1px solid #ccc;border-radius:9px;font-size:16px}
+button{padding:13px 18px;border:0;border-radius:9px;background:#5146e5;color:white;font-size:16px;cursor:pointer;margin:5px 3px}
+button:disabled{opacity:.5}
+#status{margin:15px 0;color:#5146e5}
+audio{width:100%;margin-top:15px}
+small{color:#666}
+</style>
+</head>
+<body>
+<main>
+<h1>Free AI Text to Speech</h1>
+<p>Turn your text into natural-sounding speech.</p>
+
+<textarea id="text" rows="7" placeholder="Type or paste your text here..."></textarea>
+
+<label for="voice">Choose a voice</label>
+<select id="voice">
+<option value="af_heart">Heart - American Female</option>
+<option value="af_bella">Bella - American Female</option>
+<option value="af_nicole">Nicole - American Female</option>
+<option value="af_sarah">Sarah - American Female</option>
+<option value="am_michael">Michael - American Male</option>
+<option value="am_fenrir">Fenrir - American Male</option>
+<option value="bf_emma">Emma - British Female</option>
+<option value="bm_george">George - British Male</option>
+</select>
+
+<button id="generate">Generate Speech</button>
+<div id="status">Ready. The voice model loads when you first generate.</div>
+<audio id="player" controls></audio>
+<p><a id="download" hidden download="speech.wav">Download audio</a></p>
+<h3>Recent text history</h3>
+<ul id="history"></ul>
+<small>Speech is generated in your browser. The first model download may take some time.</small>
+</main>
+
+<script type="module">
+import { KokoroTTS } from "https://esm.sh/kokoro-js@1.2.1";
+
+const status = document.getElementById("status");
+const button = document.getElementById("generate");
+const player = document.getElementById("player");
+const download = document.getElementById("download");
+let tts = null;
+let audioUrl = null;
+
+function saveWav(samples, rate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const write = (offset, value) => {
+    for (let i = 0; i < value.length; i++)
+      view.setUint8(offset + i, value.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (const sample of samples) {
+    const s = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, s < 0 ? s * 32768 : s * 32767, true);
+    offset += 2;
+  }
+  return new Blob([buffer], {type:"audio/wav"});
+}
+
+function showHistory(text) {
+  let items = JSON.parse(localStorage.getItem("ttsHistory") || "[]");
+  items.unshift(text);
+  items = [...new Set(items)].slice(0, 5);
+  localStorage.setItem("ttsHistory", JSON.stringify(items));
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = document.getElementById("history");
+  list.innerHTML = "";
+  const items = JSON.parse(localStorage.getItem("ttsHistory") || "[]");
+  items.forEach(item => {
+    const li = document.createElement("li");
+    li.textContent = item.slice(0, 100);
+    li.style.cursor = "pointer";
+    li.onclick = () => document.getElementById("text").value = item;
+    list.appendChild(li);
+  });
+}
+
+button.onclick = async () => {
+  const text = document.getElementById("text").value.trim();
+  if (!text) {
+    status.textContent = "Please enter some text.";
+    return;
+  }
+  button.disabled = true;
+  download.hidden = true;
+  try {
+    if (!tts) {
+      status.textContent = "Downloading AI voice model. Please wait...";
+      tts = await KokoroTTS.from_pretrained(
+        "onnx-community/Kokoro-82M-v1.0-ONNX",
+        {dtype:"q8", device:"wasm"}
+      );
+    }
+    status.textContent = "Generating speech...";
+    const result = await tts.generate(text, {
+      voice: document.getElementById("voice").value
+    });
+    const blob = saveWav(result.audio, result.sampling_rate);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(blob);
+    player.src = audioUrl;
+    download.href = audioUrl;
+    download.hidden = false;
+    download.textContent = "Download WAV audio";
+    showHistory(text);
+    status.textContent = "Your speech is ready!";
+  } catch (error) {
+    console.error(error);
+    status.textContent = "Something went wrong. Try again or use a modern browser.";
+  } finally {
+    button.disabled = false;
+  }
+};
+
+renderHistory();
+</script>
+</body>
+</html>
